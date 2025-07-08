@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Matrix Bug Insect</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.js"></script>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&display=swap");
+
+      body {
+        margin: 0;
+        overflow: hidden;
+        background: radial-gradient(circle at center, #0a0a0a 0%, #000000 100%);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        font-family: "Courier Prime", "Courier New", monospace;
+      }
+
+      .controls {
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        color: #ff6b6b;
+        font-size: 12px;
+        z-index: 100;
+        background: rgba(0, 0, 0, 0.8);
+        padding: 15px;
+        border-radius: 8px;
+        border: 1px solid #ff6b6b;
+        box-shadow: 0 0 20px rgba(255, 107, 107, 0.3);
+        font-family: "Courier Prime", monospace;
+      }
+
+      .title {
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        color: #ff6b6b;
+        font-size: 16px;
+        font-weight: bold;
+        z-index: 100;
+        background: rgba(0, 0, 0, 0.8);
+        padding: 10px;
+        border-radius: 5px;
+        border: 1px solid #ff6b6b;
+        box-shadow: 0 0 20px rgba(255, 107, 107, 0.3);
+        font-family: "Courier Prime", monospace;
+      }
+
+      .horror-text {
+        animation: flicker 0.5s infinite alternate;
+      }
+
+      @keyframes flicker {
+        0% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.8;
+        }
+        100% {
+          opacity: 1;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="controls">
+      <div>Click anywhere to spawn bugs</div>
+      <div>Press SPACE to pause/resume</div>
+      <div>Press 'H' to toggle hunt mode</div>
+      <div>Press 'S' to change swarm size</div>
+      <div>Press 'R' to reset bugs</div>
+      <div>Move mouse to attract bugs</div>
+    </div>
+
+    <div class="title horror-text" id="title">MATRIX BUG</div>
+
+    <script>
+      let bugs = [];
+      let isPaused = false;
+      let huntMode = false;
+      let swarmSize = 1; // 1 = few, 2 = normal, 3 = many
+      let backgroundNoise = [];
+      let t = 0;
+
+      class MatrixBug {
+        constructor(x, y) {
+          this.x = x || random(width);
+          this.y = y || random(height);
+          this.size = random(8, 15);
+          this.angle = random(TWO_PI);
+          this.speed = random(1, 3);
+          this.legAngle = 0;
+          this.bodySegments = [];
+          this.legs = [];
+          this.antennae = [];
+          this.isHunting = false;
+          this.target = null;
+          this.health = 100;
+          this.metallic = random(0.3, 0.8);
+          this.glowIntensity = 0;
+          this.crawlPhase = random(TWO_PI);
+          this.lastX = x;
+          this.lastY = y;
+          this.trail = [];
+          this.maxTrailLength = 8;
+
+          // Initialize body segments
+          for (let i = 0; i < 3; i++) {
+            this.bodySegments.push({
+              x: this.x - i * 6,
+              y: this.y,
+              size: this.size * (1 - i * 0.2),
+            });
+          }
+
+          // Initialize legs (6 legs like a real insect)
+          for (let i = 0; i < 6; i++) {
+            this.legs.push({
+              angle: (i * PI) / 3 + random(-0.3, 0.3),
+              length: this.size * 0.8,
+              jointAngle: 0,
+              phase: (i * PI) / 3,
+            });
+          }
+
+          // Initialize antennae
+          for (let i = 0; i < 2; i++) {
+            this.antennae.push({
+              angle: PI + (i - 0.5) * 0.8,
+              length: this.size * 0.6,
+              segments: 3,
+            });
+          }
+        }
+
+        update() {
+          if (!isPaused) {
+            this.crawlPhase += 0.15;
+            this.legAngle += 0.1;
+
+            // Store previous position for trail
+            this.trail.push({ x: this.x, y: this.y });
+            if (this.trail.length > this.maxTrailLength) {
+              this.trail.shift();
+            }
+
+            // Movement behavior
+            if (huntMode || this.isHunting) {
+              this.huntBehavior();
+            } else {
+              this.wanderBehavior();
+            }
+
+            // Update body segments to follow
+            for (let i = 1; i < this.bodySegments.length; i++) {
+              let prev = i === 1 ? this : this.bodySegments[i - 1];
+              let dx = prev.x - this.bodySegments[i].x;
+              let dy = prev.y - this.bodySegments[i].y;
+              let distance = sqrt(dx * dx + dy * dy);
+
+              if (distance > 8) {
+                this.bodySegments[i].x += dx * 0.3;
+                this.bodySegments[i].y += dy * 0.3;
+              }
+            }
+
+            // Update leg animation
+            for (let i = 0; i < this.legs.length; i++) {
+              this.legs[i].jointAngle =
+                sin(this.crawlPhase + this.legs[i].phase) * 0.5;
+            }
+
+            // Boundary behavior - crawl along walls
+            if (this.x < 0 || this.x > width || this.y < 0 || this.y > height) {
+              this.angle += PI + random(-0.5, 0.5);
+              this.x = constrain(this.x, 10, width - 10);
+              this.y = constrain(this.y, 10, height - 10);
+            }
+
+            // Glow effect
+            this.glowIntensity = sin(frameCount * 0.1) * 0.3 + 0.7;
+          }
+        }
+
+        wanderBehavior() {
+          // Random wandering with slight direction changes
+          this.angle += random(-0.1, 0.1);
+          this.x += cos(this.angle) * this.speed;
+          this.y += sin(this.angle) * this.speed;
+
+          // Occasionally change direction more dramatically
+          if (random() < 0.02) {
+            this.angle += random(-PI / 2, PI / 2);
+          }
+        }
+
+        huntBehavior() {
+          // Move towards mouse or random target
+          let targetX = mouseX;
+          let targetY = mouseY;
+
+          let dx = targetX - this.x;
+          let dy = targetY - this.y;
+          let distance = sqrt(dx * dx + dy * dy);
+
+          if (distance > 5) {
+            this.angle = atan2(dy, dx) + random(-0.2, 0.2);
+            this.x += cos(this.angle) * this.speed * 1.5;
+            this.y += sin(this.angle) * this.speed * 1.5;
+            this.isHunting = true;
+          } else {
+            this.isHunting = false;
+          }
+        }
+
+        display() {
+          push();
+
+          // Draw trail
+          this.drawTrail();
+
+          translate(this.x, this.y);
+          rotate(this.angle);
+
+          // Draw legs first (behind body)
+          this.drawLegs();
+
+          // Draw body segments
+          this.drawBody();
+
+          // Draw head
+          this.drawHead();
+
+          // Draw antennae
+          this.drawAntennae();
+
+          pop();
+        }
+
+        drawTrail() {
+          if (this.trail.length > 1) {
+            push();
+            noFill();
+            for (let i = 0; i < this.trail.length - 1; i++) {
+              let alpha = map(i, 0, this.trail.length - 1, 0, 50);
+              stroke(150, 50, 50, alpha);
+              strokeWeight(1);
+              line(
+                this.trail[i].x,
+                this.trail[i].y,
+                this.trail[i + 1].x,
+                this.trail[i + 1].y
+              );
+            }
+            pop();
+          }
+        }
+
+        drawLegs() {
+          push();
+          strokeWeight(2);
+
+          for (let leg of this.legs) {
+            push();
+            rotate(leg.angle);
+
+            // Upper leg segment
+            stroke(
+              80 + this.metallic * 50,
+              80 + this.metallic * 50,
+              80 + this.metallic * 50
+            );
+            line(0, 0, leg.length * 0.6, 0);
+
+            // Joint
+            push();
+            translate(leg.length * 0.6, 0);
+            rotate(leg.jointAngle);
+
+            // Lower leg segment
+            stroke(
+              60 + this.metallic * 40,
+              60 + this.metallic * 40,
+              60 + this.metallic * 40
+            );
+            line(0, 0, leg.length * 0.4, 0);
+
+            // Foot
+            fill(100, 50, 50);
+            noStroke();
+            ellipse(leg.length * 0.4, 0, 2, 2);
+
+            pop();
+            pop();
+          }
+          pop();
+        }
+
+        drawBody() {
+          // Draw body segments
+          for (let i = 0; i < this.bodySegments.length; i++) {
+            let segment = this.bodySegments[i];
+            push();
+            translate(segment.x - this.x, segment.y - this.y);
+
+            // Metallic body with red glow
+            fill(60 + this.metallic * 40, 20, 20, 200);
+            stroke(100 + this.metallic * 50, 30, 30);
+            strokeWeight(1);
+
+            // Main body
+            ellipse(0, 0, segment.size, segment.size * 0.7);
+
+            // Segmentation lines
+            stroke(40, 10, 10);
+            for (let j = -1; j <= 1; j++) {
+              line(
+                -segment.size / 2,
+                (j * segment.size) / 6,
+                segment.size / 2,
+                (j * segment.size) / 6
+              );
+            }
+
+            // Glow effect
+            fill(255, 100, 100, this.glowIntensity * 30);
+            noStroke();
+            ellipse(0, 0, segment.size * 1.2, segment.size * 0.9);
+
+            pop();
+          }
+        }
+
+        drawHead() {
+          push();
+
+          // Head shape
+          fill(40 + this.metallic * 30, 15, 15);
+          stroke(80 + this.metallic * 40, 25, 25);
+          strokeWeight(1);
+          ellipse(this.size * 0.7, 0, this.size * 0.8, this.size * 0.6);
+
+          // Eyes (mechanical/glowing)
+          fill(255, 50, 50, this.glowIntensity * 255);
+          noStroke();
+          ellipse(this.size * 0.9, -this.size * 0.1, 3, 3);
+          ellipse(this.size * 0.9, this.size * 0.1, 3, 3);
+
+          // Eye glow
+          fill(255, 100, 100, this.glowIntensity * 100);
+          ellipse(this.size * 0.9, -this.size * 0.1, 6, 6);
+          ellipse(this.size * 0.9, this.size * 0.1, 6, 6);
+
+          // Mandibles
+          stroke(60, 20, 20);
+          strokeWeight(2);
+          line(
+            this.size * 0.9,
+            -this.size * 0.2,
+            this.size * 1.1,
+            -this.size * 0.3
+          );
+          line(
+            this.size * 0.9,
+            this.size * 0.2,
+            this.size * 1.1,
+            this.size * 0.3
+          );
+
+          pop();
+        }
+
+        drawAntennae() {
+          push();
+          stroke(70, 30, 30);
+          strokeWeight(1);
+
+          for (let antenna of this.antennae) {
+            push();
+            rotate(antenna.angle);
+
+            let segmentLength = antenna.length / antenna.segments;
+            let currentX = 0,
+              currentY = 0;
+
+            for (let i = 0; i < antenna.segments; i++) {
+              let nextX =
+                currentX + cos(sin(this.crawlPhase + i) * 0.3) * segmentLength;
+              let nextY =
+                currentY + sin(sin(this.crawlPhase + i) * 0.3) * segmentLength;
+
+              line(currentX, currentY, nextX, nextY);
+              currentX = nextX;
+              currentY = nextY;
+            }
+
+            // Antenna tip
+            fill(100, 50, 50);
+            noStroke();
+            ellipse(currentX, currentY, 2, 2);
+
+            pop();
+          }
+          pop();
+        }
+      }
+
+      function setup() {
+        createCanvas(windowWidth, windowHeight);
+
+        // Create initial bugs
+        for (let i = 0; i < 3; i++) {
+          bugs.push(new MatrixBug());
+        }
+
+        // Create background noise points
+        for (let i = 0; i < 100; i++) {
+          backgroundNoise.push({
+            x: random(width),
+            y: random(height),
+            intensity: random(0.1, 0.3),
+          });
+        }
+      }
+
+      function draw() {
+        // Dark background with slight noise
+        background(5, 5, 5);
+
+        // Draw background noise/static
+        drawBackgroundNoise();
+
+        // Update and display bugs
+        for (let bug of bugs) {
+          bug.update();
+          bug.display();
+        }
+
+        // Draw creepy atmosphere effects
+        drawAtmosphereEffects();
+
+        t += 0.01;
+      }
+
+      function drawBackgroundNoise() {
+        push();
+        fill(50, 20, 20, 100);
+        noStroke();
+        for (let noise of backgroundNoise) {
+          let alpha =
+            noise.intensity * (sin(frameCount * 0.1 + noise.x * 0.01) + 1) * 50;
+          fill(50, 20, 20, alpha);
+          ellipse(noise.x, noise.y, 1, 1);
+        }
+        pop();
+      }
+
+      function drawAtmosphereEffects() {
+        // Subtle scanning lines
+        if (random() < 0.01) {
+          push();
+          stroke(100, 30, 30, 50);
+          strokeWeight(1);
+          let y = random(height);
+          line(0, y, width, y);
+          pop();
+        }
+
+        // Pulsing red glow around edges
+        push();
+        stroke(100, 20, 20, 30);
+        strokeWeight(20);
+        noFill();
+        rect(0, 0, width, height);
+        pop();
+      }
+
+      function keyPressed() {
+        if (key === " ") {
+          isPaused = !isPaused;
+        } else if (key === "h" || key === "H") {
+          huntMode = !huntMode;
+          for (let bug of bugs) {
+            bug.isHunting = huntMode;
+          }
+        } else if (key === "s" || key === "S") {
+          swarmSize = (swarmSize % 3) + 1;
+          adjustSwarmSize();
+        } else if (key === "r" || key === "R") {
+          bugs = [];
+          for (let i = 0; i < 3; i++) {
+            bugs.push(new MatrixBug());
+          }
+        }
+      }
+
+      function adjustSwarmSize() {
+        let targetCount = swarmSize === 1 ? 3 : swarmSize === 2 ? 8 : 15;
+
+        while (bugs.length < targetCount) {
+          bugs.push(new MatrixBug());
+        }
+
+        while (bugs.length > targetCount) {
+          bugs.pop();
+        }
+      }
+
+      function mousePressed() {
+        // Spawn new bugs near mouse click
+        for (let i = 0; i < 2; i++) {
+          bugs.push(
+            new MatrixBug(mouseX + random(-50, 50), mouseY + random(-50, 50))
+          );
+        }
+      }
+
+      function windowResized() {
+        resizeCanvas(windowWidth, windowHeight);
+
+        // Regenerate background noise
+        backgroundNoise = [];
+        for (let i = 0; i < 100; i++) {
+          backgroundNoise.push({
+            x: random(width),
+            y: random(height),
+            intensity: random(0.1, 0.3),
+          });
+        }
+      }
+
+      // Touch support for mobile
+      function touchStarted() {
+        mousePressed();
+        return false;
+      }
+    </script>
+  </body>
+</html>
